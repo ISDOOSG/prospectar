@@ -1,0 +1,49 @@
+---
+name: Onboarding Logic
+description: Per-user onboarding gating com readiness real do Vault — admins e agents tratados separadamente
+type: feature
+---
+
+# Onboarding redesign (per-user + Vault readiness)
+
+## Modelo
+
+Não usa mais `settings.onboarding_completed` (campo legado, mantido só por compat). O gating é determinado por dois sinais reais:
+
+1. **`workspace_ready`** — função SQL `public.is_workspace_ready()` retorna `true` se existir linha em `api_keys_registry` com `service_name='apollo' AND is_active=true`. Chave Apollo no Vault = workspace operacional.
+2. **`user_completed`** — linha em `public.user_onboarding (user_id PK, completed_at)` indica que o usuário individual passou pelo wizard. RLS: cada usuário só lê/escreve a própria linha.
+
+## Edge function `app-config` ações
+
+- `get_onboarding_state` → `{ workspace_ready, user_completed, is_admin }`
+- `mark_user_onboarded` → upsert em `user_onboarding` para `auth.uid()`
+- `reset_user_onboarding` → delete da linha do usuário atual
+
+## Hook `useIsOnboarded` (src/hooks/useSettings.ts)
+
+- **Admin**: `isOnboarded = workspace_ready && user_completed`
+- **Agent/Supervisor**: `isOnboarded = workspace_ready` (não pode mexer no Vault, então só espera)
+
+## Roteamento (`App.tsx` / `RequireOnboarding`)
+
+| Cenário | Tela |
+|---|---|
+| Loading | spinner |
+| `!isAdmin && !workspaceReady` | `<WaitingForAdminSetup />` (re-checa a cada 15s) |
+| `isOnboarded` em `/setup` | redirect `/` |
+| `!isOnboarded` em rota não-`/setup` | redirect `/setup` |
+
+## Onboarding wizard (`OnboardingPage`)
+
+- Não-admin → mostra `WaitingForAdminSetup` direto (não tem permissão de `set_project_secret`).
+- Step Apollo: se `apiKeys?.apollo?.configured` (2º admin), mostra banner verde "Já configurado por outro admin" e desabilita exigência da chave (botão Próximo libera).
+- `handleFinish`:
+  1. Salva todas as chaves preenchidas via `useSaveApiKey` (validação server-side, key inválida não é gravada).
+  2. Salva preferências non-secret via `useSaveSettings`.
+  3. Re-chama `get_onboarding_state` para confirmar que `workspace_ready=true`. Se não, volta ao step 1 com erro "Apollo não foi salvo".
+  4. Chama `mark_user_onboarded` (per-user). Só então redireciona para `/`.
+
+## Settings page
+
+- "Reconfigurar minha conta" → `useResetUserOnboarding` (apaga só a linha do usuário) → `/setup`. Vault preservado.
+- "Apagar todas as chaves do workspace" (admin-only, com confirmação): chama `delete_project_secret` para cada serviço em `["apollo","apify","crustdata","tavily","pdl","evolution","resend"]`, depois reseta o user e vai para `/setup`. Todos os usuários do workspace vão acabar redirecionados pelo gating.

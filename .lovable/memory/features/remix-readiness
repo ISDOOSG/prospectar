@@ -1,0 +1,35 @@
+---
+name: Remix Readiness
+description: Estratégia para remix funcionar 100% — README, edge function de health check, RPC de introspecção e card no SettingsPage
+type: feature
+---
+
+# Remix Setup
+
+Quando alguém remixa o ProspectAI, um novo backend Lovable Cloud (Supabase) é provisionado. Migrations rodam automaticamente, mas o **Vault é por projeto** — chaves não copiam.
+
+## Componentes
+
+1. **`README.md`**: Guia "Setup pós-remix em 5 minutos" — signup → wizard → Apollo obrigatória → demais opcionais.
+2. **Edge function `remix-health-check`** (`verify_jwt=false`): Endpoint público que valida:
+   - `schema`: 10 tabelas obrigatórias presentes
+   - `functions`: 7 funções SQL obrigatórias presentes
+   - `workspace_ready`: chave Apollo no Vault
+   - `has_admin`: pelo menos 1 admin cadastrado
+   - `integrations`: status de cada serviço conhecido
+   - Retorna `usable` (tudo ok) + `next_step` (mensagem acionável).
+3. **RPC `_remix_introspect()`** (SECURITY DEFINER, GRANT a anon/auth/service_role): Lê `information_schema` (PostgREST não acessa direto). Retorna `{tables, functions}`.
+4. **`<WorkspaceHealthCard />`**: Card no topo do `/settings` (admin-only) que chama o health check via `useQuery`. Mostra badges de status + breakdown de integrações.
+
+## Fluxo do 1º admin pós-remix
+
+1. Acessa `/auth` → cadastra → `handle_new_user()` detecta `count(profiles)=0` e promove a `admin`.
+2. Login → `RequireOnboarding` vê `workspace_ready=false` → redireciona `/setup`.
+3. Wizard valida cada chave server-side antes de gravar no Vault.
+4. Apollo gravada → `is_workspace_ready()=true` → `mark_user_onboarded` → libera `/`.
+
+## Convenções
+
+- Chaves nunca em env vars Deno (apenas SUPABASE_*, LOVABLE_API_KEY, FIRECRAWL_API_KEY managed).
+- Nenhum dado seed no remix (banco vazio, schema only).
+- Health check é o único endpoint que pode rodar antes do login (precisa para diagnóstico).

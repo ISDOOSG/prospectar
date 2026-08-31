@@ -1,0 +1,322 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* ── Base ── */
+    --background: 0 0% 93%;
+    --foreground: 213 96% 9%;
+
+    --card: 0 0% 98%;
+    --card-foreground: 213 96% 9%;
+
+    --popover: 0 0% 98%;
+    --popover-foreground: 213 96% 9%;
+
+    --primary: 213 96% 9%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 0 0% 96%;
+    --secondary-foreground: 213 96% 9%;
+
+    --muted: 0 0% 89%;
+    --muted-foreground: 213 40% 30%;
+
+    --accent: 239 84% 67%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+
+    --success: 160 84% 39%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 43 96% 56%;
+    --warning-foreground: 0 0% 100%;
+
+    --info: 239 84% 67%;
+    --info-foreground: 0 0% 100%;
+
+    --border: 0 0% 82%;
+    --input: 0 0% 82%;
+    --ring: 239 84% 67%;
+
+    --radius: 0.625rem;
+
+    /* ── Sidebar ── */
+    --sidebar-background: 213 96% 6%;
+    --sidebar-foreground: 240 10% 70%;
+    --sidebar-primary: 239 84% 67%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 213 96% 9%;
+    --sidebar-accent-foreground: 240 20% 95%;
+    --sidebar-border: 213 50% 14%;
+    --sidebar-ring: 239 84% 67%;
+
+    /* ── Misc ── */
+    --dark-bg: 213 96% 9%;
+    --progress-active: 239 84% 67%;
+    --progress-inactive: 213 50% 14%;
+
+    /* ── Design System Backgrounds ── */
+    --bg-base: 0 0% 93%;
+    --bg-surface-1: 0 0% 96%;
+    --bg-surface-2: 0 0% 89%;
+    --bg-elevated: 0 0% 98%;
+    --bg-subtle-accent: 213 10% 92%;
+    --bg-dark: 213 96% 9%;
+    --bg-darkest: 213 96% 6%;
+
+    /* ── Design System Text ── */
+    --text-primary: 213 96% 9%;
+    --text-secondary: 213 40% 30%;
+    --text-tertiary: 213 20% 50%;
+    --text-on-dark: 240 20% 95%;
+    --text-on-dark-muted: 240 10% 70%;
+
+    /* ── Design System Accents ── */
+    --accent-primary: 239 84% 67%;
+    --accent-primary-hover: 244 80% 58%;
+    --accent-primary-light: 234 89% 74%;
+    --accent-warm: 43 96% 56%;
+    --accent-success: 160 84% 39%;
+
+    /* ── Design System Borders ── */
+    --border-default: 0 0% 82%;
+    --border-subtle: 0 0% 87%;
+
+    /* ── Design System Shadows ── */
+    --shadow-color: 213 96% 9%;
+  }
+
+  .dark {
+    --background: 220 20% 8%;
+    --foreground: 210 20% 92%;
+
+    --card: 220 18% 11%;
+    --card-foreground: 210 20% 92%;
+
+    --popover: 220 18% 11%;
+    --popover-foreground: 210 20% 92%;
+
+    --primary: 210 60% 70%;
+    --primary-foreground: 220 20% 8%;
+
+    --secondary: 220 16% 15%;
+    --secondary-foreground: 210 20% 92%;
+
+    --muted: 220 16% 15%;
+    --muted-foreground: 210 10% 55%;
+
+    --accent: 239 84% 67%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 63% 50%;
+    --destructive-foreground: 210 40% 98%;
+
+    --success: 160 84% 45%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 43 96% 65%;
+    --warning-foreground: 220 20% 8%;
+
+    --info: 239 84% 67%;
+    --info-foreground: 0 0% 100%;
+
+    --border: 220 14% 20%;
+    --input: 220 14% 20%;
+    --ring: 239 84% 67%;
+
+    --sidebar-background: 220 22% 4%;
+    --sidebar-foreground: 210 10% 60%;
+    --sidebar-primary: 239 84% 67%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 16% 12%;
+    --sidebar-accent-foreground: 210 20% 92%;
+    --sidebar-border: 220 14% 14%;
+    --sidebar-ring: 239 84% 67%;
+
+    /* ── Design System Backgrounds (Dark) ── */
+    --bg-base: 220 20% 8%;
+    --bg-surface-1: 220 18% 11%;
+    --bg-surface-2: 220 16% 15%;
+    --bg-elevated: 220 18% 13%;
+    --bg-subtle-accent: 220 20% 15%;
+    --bg-dark: 220 20% 6%;
+    --bg-darkest: 220 22% 4%;
+
+    /* ── Design System Text (Dark) ── */
+    --text-primary: 210 20% 92%;
+    --text-secondary: 210 10% 55%;
+    --text-tertiary: 210 8% 42%;
+    --text-on-dark: 210 20% 92%;
+    --text-on-dark-muted: 210 10% 55%;
+
+    /* ── Design System Accents (Dark) ── */
+    --accent-primary: 239 84% 67%;
+    --accent-primary-hover: 244 80% 58%;
+    --accent-primary-light: 234 89% 74%;
+    --accent-warm: 43 96% 65%;
+    --accent-success: 160 84% 45%;
+
+    /* ── Design System Borders (Dark) ── */
+    --border-default: 220 14% 20%;
+    --border-subtle: 220 12% 16%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+}
+
+@layer utilities {
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  .scrollbar-thin {
+    scrollbar-width: thin;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 3px;
+  }
+}
+
+/* ══════════════════════════════════════
+   Keyframes & Animations
+   ══════════════════════════════════════ */
+
+@keyframes confetti-fall {
+  0% { transform: translateY(-10px) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(120px) rotate(720deg); opacity: 0; }
+}
+
+.confetti-card::before,
+.confetti-card::after {
+  content: "";
+  position: absolute;
+  top: -4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  opacity: 0;
+  pointer-events: none;
+  animation: confetti-fall 3s ease-in-out infinite;
+}
+.confetti-card::before {
+  left: 25%;
+  background: hsl(43, 96%, 56%);
+  animation-delay: 0s;
+}
+.confetti-card::after {
+  left: 65%;
+  background: hsl(43, 96%, 70%);
+  animation-delay: 1.5s;
+}
+
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+
+@keyframes neon-pulse-indigo {
+  0%, 100% { box-shadow: 0 0 12px rgba(99,102,241,0.15), 0 0 24px rgba(99,102,241,0.06); }
+  50% { box-shadow: 0 0 18px rgba(99,102,241,0.30), 0 0 36px rgba(99,102,241,0.12); }
+}
+
+@keyframes neon-pulse-emerald {
+  0%, 100% { box-shadow: 0 0 10px rgba(16,185,129,0.10), 0 0 20px rgba(16,185,129,0.04); }
+  50% { box-shadow: 0 0 14px rgba(16,185,129,0.20), 0 0 28px rgba(16,185,129,0.08); }
+}
+
+@keyframes neon-border-travel {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+/* ══════════════════════════════════════
+   LP Component Classes
+   ══════════════════════════════════════ */
+
+@layer components {
+  .lp-section-light {
+    background-color: hsl(0 0% 93%);
+    color: hsl(213 90% 9%);
+  }
+  .lp-section-light h2, .lp-section-light h3, .lp-section-light h4 { color: hsl(213 90% 9%); }
+  .lp-section-light p, .lp-section-light .text-muted-foreground { color: hsl(213 30% 40%); }
+
+  .lp-section-dark { background-color: hsl(214 93% 6%); }
+
+  .lp-solid-card {
+    background: hsl(0 0% 100%);
+    border: 1px solid hsl(0 0% 88%);
+    border-radius: 0.75rem;
+  }
+
+  .lp-solid-card-dark {
+    background: hsl(213 70% 11%);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0.75rem;
+  }
+
+  .lp-glass-card {
+    background: rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 1rem;
+  }
+
+  .lp-header-scrolled {
+    background: rgba(2, 22, 42, 0.85);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .lp-btn-primary-indigo {
+    @apply font-semibold px-8 py-4 rounded-xl transition-all duration-200;
+    background-color: hsl(239 84% 67%);
+    color: white;
+  }
+  .lp-btn-primary-indigo:hover { filter: brightness(1.1); }
+
+  .lp-btn-ghost-clean {
+    @apply font-semibold px-8 py-4 rounded-xl transition-all duration-200;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: white;
+    background: transparent;
+  }
+  .lp-btn-ghost-clean:hover {
+    border-color: rgba(255, 255, 255, 0.3);
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  .lp-section-spacing { @apply py-24 lg:py-32; }
+}
