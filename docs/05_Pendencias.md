@@ -81,13 +81,14 @@ Checklist que faltava neste documento, adicionado em 31/08:
 | **F.1** | vhost nginx | padrão dos outros 4 projetos da VPS — replicar, não inventar |
 | **F.2** | unit systemd (`--user`), `Restart=on-failure` | idem |
 | **F.3** | Limpar dependências de build específicas da Lovable | `lovable-tagger` no `package.json`/`vite.config.ts` — só ativa em modo dev, não bloqueia `vite build`, mas é lixo a tirar. **`@lovable.dev/cloud-auth-js` sai junto com a solução de B.9** |
+| **F.5** | ~~Onde o serviço roda / subdomínio~~ ✅ **DECIDIDO 01/09** | `prospectar.imagohub.com.br` — registro A criado por ele e resolvendo. Ver `06_Provisionamento_VPS.md` |
 | **F.4** | Evolution: apontar para instância interna | `settings.evolution_api_url` é campo configurável, não fixo. Se apontar para `evolution.movisat.com.br` (a mesma VPS), o item deixa de ser conexão externa |
 
 ## G. O que já está ligado e o que não está, na esteira da VPS
 
 | Item | Estado |
 |---|---|
-| clone em `/home/claude/lead-king` | **feito** em 31/08 |
+| clone em `/home/claude/imagohub/lead-king` | **feito** em 31/08 |
 | banco real + `.env.db`/`.pgpass` | **feito** em 31/08 — ver `06_Provisionamento_VPS.md` |
 | `.gitignore` cobrindo `.pgpass`/`.env.db` | **feito** em 31/08 — confirmado com `git check-ignore` |
 | backup das 02:00 | **ligado** em 31/08 — `empacotar lead-king` no `backup_projetos.sh`, exclusão de `.pgpass` testada |

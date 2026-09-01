@@ -12,7 +12,7 @@ import csv
 import re
 import pathlib
 
-BASE = pathlib.Path("/home/claude/lead-king/docs")
+BASE = pathlib.Path("/home/claude/imagohub/lead-king/docs")
 ORIG = BASE / "origem"
 
 

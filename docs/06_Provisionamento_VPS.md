@@ -1,7 +1,8 @@
 # Provisionamento na VPS — banco e porta
 
 **Feito em 2026-08-31**, adiantado sem esperar as decisões pendentes do
-`05_Pendencias.md` (login, subdomínio etc.). Este documento é só deste
+`05_Pendencias.md` (login, cofre de segredos etc.) — o subdomínio saiu dessa
+lista em 01/09, ver a seção própria abaixo. Este documento é só deste
 projeto — cada um dos três (`lead-king`, `diagnostico-vibe`, `concorrentes`)
 tem o seu, separado.
 
@@ -42,9 +43,25 @@ das decisões B.1 a B.9 do `05_Pendencias.md`.
 **8010** — nenhum processo a está usando ainda. Reservada só para evitar que
 outro projeto futuro pegue o mesmo número.
 
+## Subdomínio — DECIDIDO em 2026-09-01
+
+| | |
+|---|---|
+| Endereço | `prospectar.imagohub.com.br` |
+| Registro DNS | `A` → `212.85.17.184`, TTL 360 |
+| Criado por | ele, no painel da Hostinger (`dns-parking.com`), em 01/09 |
+| Estado | resolvendo — conferido em 01/09 contra `1.1.1.1` |
+
+Decisão dele em 01/09: os três projetos são produtos do **ImagoHub**, não do
+Movisat, e cada um ganha subdomínio próprio sob `imagohub.com.br`. Não há
+registro `AAAA` — nenhum domínio da VPS usa IPv6, e este segue a convenção.
+
+⚠️ Isto fecha só o **nome**. O vhost nginx, o certificado e o systemd
+continuam pendentes — ver `05_Pendencias.md`.
+
 ## O que isto NÃO resolve
 
-Nginx, systemd, subdomínio, login (broker OAuth da Lovable não migra — ver
+Nginx, systemd, login (broker OAuth da Lovable não migra — ver
 B.9), cofre de segredos, e a correção de `get_vault_key` continuam
 bloqueados pelas decisões do `05_Pendencias.md`. Isto aqui é só a fundação:
 o banco existe e está pronto para receber o serviço assim que ele for
