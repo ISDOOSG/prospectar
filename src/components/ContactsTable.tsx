@@ -11,7 +11,7 @@ import { SourceBadge } from "@/components/PlatformBadge";
 import { MessageSquare, Mail, Phone, ExternalLink, Copy, ChevronDown, Sparkles, Loader2 as Spinner } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import type { Contact, ContactStatus } from "@/lib/types";
-import { supabase } from "@/integrations/supabase/client";
+import { apiFetch } from "@/lib/api-client";
 import { useQueryClient } from "@tanstack/react-query";
 
 const STATUS_OPTIONS: { value: ContactStatus; label: string; color: string }[] = [
@@ -103,7 +103,7 @@ function StatusDropdown({ contact }: { contact: Contact }) {
   const current = STATUS_OPTIONS.find((s) => s.value === contact.status) || STATUS_OPTIONS[0];
 
   const updateStatus = async (newStatus: ContactStatus) => {
-    await supabase.from("contacts").update({ status: newStatus }).eq("id", contact.id);
+    await apiFetch(`/contacts/${contact.id}`, { method: "PATCH", body: JSON.stringify({ status: newStatus }) });
     queryClient.invalidateQueries({ queryKey: ["contacts"] });
   };
 

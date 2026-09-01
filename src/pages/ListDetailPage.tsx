@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { useQueryClient } from "@tanstack/react-query";
+import { apiFetch } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -9,11 +9,12 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ContactsTable } from "@/components/ContactsTable";
 import { SourceBadge, StatusBadge } from "@/components/PlatformBadge";
+import { useContactLists } from "@/hooks/useContactLists";
 import { useContactsByList } from "@/hooks/useContactsByList";
 import { useSearchesByList } from "@/hooks/useSearchesByList";
 import { useToast } from "@/hooks/use-toast";
 import { Search, Users, Loader2, RotateCcw, Sparkles, Download, ArrowLeft, ChevronLeft, ChevronRight, AlertTriangle, CheckCircle2 } from "lucide-react";
-import type { Contact, ContactList } from "@/lib/types";
+import type { Contact } from "@/lib/types";
 
 export default function ListDetailPage() {
   const { listId } = useParams();
@@ -27,15 +28,8 @@ export default function ListDetailPage() {
   const [page, setPage] = useState(1);
   const pageSize = 20;
 
-  const { data: list } = useQuery({
-    queryKey: ["contact_list", listId],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("contact_lists").select("*").eq("id", listId!).single();
-      if (error) throw error;
-      return data as ContactList;
-    },
-    enabled: !!listId,
-  });
+  const { data: lists } = useContactLists();
+  const list = lists?.find((l) => l.id === listId);
 
   const { data: contactsData, isLoading: loadingContacts } = useContactsByList(listId, {
     search: searchFilter || undefined,
@@ -56,18 +50,26 @@ export default function ListDetailPage() {
 
   const handleBulkEnrich = async () => {
     if (selectedIds.size === 0) return;
-    toast({ title: "Enriquecendo...", description: `${selectedIds.size} contatos.` });
-    supabase.functions.invoke("contact-enrich", { body: { contactIds: Array.from(selectedIds) } }).then(({ data, error }) => {
+    const ids = Array.from(selectedIds);
+    toast({ title: "Enriquecendo...", description: `${ids.length} contatos.` });
+    Promise.allSettled(ids.map((id) => apiFetch(`/contacts/${id}/enrich`, { method: "POST" }))).then((results) => {
       queryClient.invalidateQueries({ queryKey: ["contacts"] });
-      if (error) toast({ title: "Erro", description: error.message, variant: "destructive" });
-      else toast({ title: "Enriquecido!", description: `${data?.enriched || 0} contatos atualizados.` });
+      const falhas = results.filter((r) => r.status === "rejected").length;
+      if (falhas === results.length) {
+        toast({ title: "Enriquecimento indisponível", description: "Integração externa ainda não portada.", variant: "destructive" });
+      } else {
+        toast({ title: "Enriquecido!", description: `${results.length - falhas} contatos atualizados.` });
+      }
     });
     setSelectedIds(new Set());
   };
 
   const handleBulkStatus = async (status: string) => {
     if (selectedIds.size === 0) return;
-    await supabase.from("contacts").update({ status }).in("id", Array.from(selectedIds));
+    await apiFetch("/contacts/bulk-status", {
+      method: "PATCH",
+      body: JSON.stringify({ ids: Array.from(selectedIds), status }),
+    });
     queryClient.invalidateQueries({ queryKey: ["contacts"] });
     setSelectedIds(new Set());
     toast({ title: `${selectedIds.size} contatos → ${status}` });
@@ -75,11 +77,9 @@ export default function ListDetailPage() {
 
   const handleExport = async () => {
     // Fetch all contacts for export (not just current page)
-    const { data: allContacts } = await supabase
-      .from("contacts")
-      .select("*")
-      .eq("list_id", listId!)
-      .order("created_at", { ascending: false });
+    const allContacts = await apiFetch<{ contacts: Contact[] }>(`/contacts?list_id=${listId}&page_size=10000`)
+      .then((r) => r.contacts)
+      .catch(() => null);
 
     const exportData = allContacts ?? contacts;
     const fields = ["name", "phone", "email", "company", "city", "instagram", "linkedin_url", "source", "status"];

@@ -15,7 +15,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Search, X, Loader2, MapPin, Globe, Sparkles, Target, Users, Briefcase, Heart, Brain, Ban, Plus, Bot, SlidersHorizontal, GraduationCap, Award, Share2, Building2, ChevronDown, MessageSquare, Filter, Linkedin, Instagram, Facebook, Twitter } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useContactLists } from "@/hooks/useContactLists";
-import { supabase } from "@/integrations/supabase/client";
+import { apiFetch, ApiError } from "@/lib/api-client";
 import { useQueryClient } from "@tanstack/react-query";
 import { SearchChat } from "@/components/SearchChat";
 
@@ -291,27 +291,35 @@ function AudienceBuilder() {
       let listId = targetListId && targetListId !== "none" ? targetListId : null;
       if (!listId) {
         const desc = [professions.join(", "), specialties.join(", "), locations.join(", "), allInterests.join(", ")].filter(Boolean).join(" · ");
-        const { data: newList, error } = await supabase.from("contact_lists").insert({ name, description: desc || "Prospecção" }).select().single();
-        if (error) throw error;
+        const newList = await apiFetch<{ id: string }>("/contact-lists", {
+          method: "POST",
+          body: JSON.stringify({ name, description: desc || "Prospecção" }),
+        });
         listId = newList.id;
         queryClient.invalidateQueries({ queryKey: ["contact_lists"] });
       }
 
       for (const source of Array.from(selectedSources)) {
-        const { data: search, error } = await supabase.from("lead_searches").insert({
-          name: `${name} [${SOURCES.find(s => s.id === source)?.label || source}]`,
-          source, config, status: "pending", target_list_id: listId,
-        }).select().single();
-        if (error) throw error;
-        supabase.functions.invoke("lead-search-execute", { body: { searchId: search.id } }).then(() => {
-          queryClient.invalidateQueries({ queryKey: ["lead_searches", "contacts", "contact_lists"] });
+        const search = await apiFetch<{ id: string }>("/lead-searches", {
+          method: "POST",
+          body: JSON.stringify({
+            name: `${name} [${SOURCES.find(s => s.id === source)?.label || source}]`,
+            source, config, target_list_id: listId,
+          }),
+        });
+        // A execução de verdade (Apollo/Apify/Tavily/PDL/CrustData) ainda não
+        // foi portada -- fica 501 de propósito. A busca fica "pending".
+        apiFetch(`/lead-searches/${search.id}/execute`, { method: "POST" }).catch(() => {
+          queryClient.invalidateQueries({ queryKey: ["lead_searches"] });
         });
       }
 
-      toast({ title: "Buscando!", description: `${selectedSources.size} fontes em paralelo` });
+      queryClient.invalidateQueries({ queryKey: ["lead_searches"] });
+      toast({ title: "Busca criada", description: `${selectedSources.size} fonte(s) — a execução ainda depende de integração externa não portada.` });
       navigate(`/lists/${listId}`);
-    } catch (err: any) {
-      toast({ title: "Erro", description: err.message, variant: "destructive" });
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : "Erro ao criar busca";
+      toast({ title: "Erro", description: msg, variant: "destructive" });
     } finally {
       setIsSubmitting(false);
     }

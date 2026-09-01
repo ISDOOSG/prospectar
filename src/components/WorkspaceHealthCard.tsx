@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { apiFetch } from "@/lib/api-client";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -7,23 +7,22 @@ import { CheckCircle2, AlertCircle, Loader2, RefreshCw, Activity } from "lucide-
 
 interface HealthCheck {
   ok: boolean;
-  detail?: string;
+  detail?: string | null;
 }
 
+// Formato do /health/workspace do backend novo -- substitui o
+// remix-health-check original, que checava schema/vault do Lovable
+// (nao existem mais aqui). So dois checks fazem sentido agora.
 interface HealthResponse {
-  remix_ready: boolean;
   usable: boolean;
   checks: Record<string, HealthCheck>;
   integrations: Record<string, "configured" | "missing">;
   next_step: string;
-  error?: string;
 }
 
 const CHECK_LABELS: Record<string, string> = {
-  schema: "Schema do banco",
-  functions: "Funções SQL",
-  workspace_ready: "Workspace pronto (Apollo)",
   has_admin: "Admin cadastrado",
+  workspace_ready: "Workspace pronto (Apollo)",
 };
 
 const INTEGRATION_LABELS: Record<string, string> = {
@@ -37,16 +36,9 @@ const INTEGRATION_LABELS: Record<string, string> = {
 };
 
 export function WorkspaceHealthCard() {
-  const { data, isLoading, refetch, isFetching } = useQuery({
+  const { data, isLoading, refetch, isFetching, error } = useQuery({
     queryKey: ["workspace-health"],
-    queryFn: async () => {
-      const { data, error } = await supabase.functions.invoke<HealthResponse>(
-        "remix-health-check",
-        { body: {} }
-      );
-      if (error) throw error;
-      return data!;
-    },
+    queryFn: () => apiFetch<HealthResponse>("/health/workspace"),
     staleTime: 30_000,
   });
 
@@ -57,7 +49,7 @@ export function WorkspaceHealthCard() {
           <CardTitle className="flex items-center gap-2 text-base">
             <Activity className="h-4 w-4" /> Status do workspace
           </CardTitle>
-          <CardDescription>Verifica schema, funções, vault e integrações deste projeto.</CardDescription>
+          <CardDescription>Verifica administração e integrações deste projeto.</CardDescription>
         </div>
         <Button
           variant="outline"
@@ -75,13 +67,13 @@ export function WorkspaceHealthCard() {
           </div>
         )}
 
-        {data?.error && (
+        {error && (
           <div className="text-sm text-destructive flex items-center gap-2">
-            <AlertCircle className="h-4 w-4" /> {data.error}
+            <AlertCircle className="h-4 w-4" /> Não foi possível verificar o workspace
           </div>
         )}
 
-        {data && !data.error && (
+        {data && (
           <>
             <div className="flex items-center gap-2">
               {data.usable ? (

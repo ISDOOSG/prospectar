@@ -1,16 +1,10 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { apiFetch } from "@/lib/api-client";
 
 export function useDeleteContactList() {
   const queryClient = useQueryClient();
-
   return useMutation({
-    mutationFn: async (listId: string) => {
-      const { error } = await supabase.from("contact_lists").delete().eq("id", listId);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["contact_lists"] });
-    },
+    mutationFn: (id: string) => apiFetch(`/contact-lists/${id}`, { method: "DELETE" }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["contact_lists"] }),
   });
 }

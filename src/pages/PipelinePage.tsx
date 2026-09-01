@@ -3,7 +3,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { supabase } from "@/integrations/supabase/client";
+import { apiFetch } from "@/lib/api-client";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Phone, Mail } from "lucide-react";
@@ -22,7 +22,7 @@ export default function PipelinePage() {
   const { toast } = useToast();
 
   const move = async (id: string, status: ContactStatus) => {
-    await supabase.from("contacts").update({ status }).eq("id", id);
+    await apiFetch(`/contacts/${id}`, { method: "PATCH", body: JSON.stringify({ status }) });
     queryClient.invalidateQueries({ queryKey: ["contacts"] });
   };
 

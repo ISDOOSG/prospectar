@@ -11,7 +11,7 @@ import {
   MessageSquare, Send, Sparkles, Loader2, CheckCircle2, XCircle,
   Users, RefreshCw, ChevronRight, AlertCircle, Smartphone
 } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
+import { apiFetch, ApiError } from "@/lib/api-client";
 import { useContactLists } from "@/hooks/useContactLists";
 import { useContactsByList } from "@/hooks/useContactsByList";
 import { useSettings, useApiKeys } from "@/hooks/useSettings";
@@ -80,10 +80,10 @@ export default function ComporPage() {
 
     try {
       const selectedList = eligibleContacts.filter(c => selectedContacts.has(c.id));
-      const { data, error } = await supabase.functions.invoke("generate-opener", {
-        body: { contacts: selectedList, template_hint: templateHint },
+      const data = await apiFetch<{ results: { contact_id: string; openers: string[] }[] }>("/messages/generate-opener", {
+        method: "POST",
+        body: JSON.stringify({ contacts: selectedList, template_hint: templateHint }),
       });
-      if (error) throw error;
 
       const newOpeners: Record<string, string[]> = {};
       const newChosen: Record<string, string> = {};
@@ -94,8 +94,9 @@ export default function ComporPage() {
       setOpeners(newOpeners);
       setChosenOpeners(newChosen);
       setStep("review");
-    } catch (err: any) {
-      toast({ title: "Erro ao gerar openers", description: err.message, variant: "destructive" });
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : "Erro ao gerar openers";
+      toast({ title: "Erro ao gerar openers", description: msg, variant: "destructive" });
     } finally {
       setGeneratingOpeners(false);
     }
@@ -120,26 +121,18 @@ export default function ComporPage() {
         return;
       }
 
-      let data: any;
-      if (channel === "whatsapp") {
-        const resp = await supabase.functions.invoke("whatsapp-send", {
-          body: { action: "send_bulk", contacts: payload },
-        });
-        if (resp.error) throw resp.error;
-        data = resp.data;
-      } else {
-        const resp = await supabase.functions.invoke("email-send", {
-          body: {
-            action: "send_bulk",
-            contacts: payload,
-            subject: emailSubject || "Olá!",
-            from_name: settings?.resend_from_name || settings?.workspace_name || "ProspectAI",
-            from_email: settings?.resend_from_email || undefined,
-          },
-        });
-        if (resp.error) throw resp.error;
-        data = resp.data;
-      }
+      const data = channel === "whatsapp"
+        ? await apiFetch<{ sent: number; failed: number }>("/messages/whatsapp", {
+            method: "POST", body: JSON.stringify({ action: "send_bulk", contacts: payload }),
+          })
+        : await apiFetch<{ sent: number; failed: number }>("/messages/email", {
+            method: "POST",
+            body: JSON.stringify({
+              action: "send_bulk", contacts: payload, subject: emailSubject || "Olá!",
+              from_name: settings?.resend_from_name || settings?.workspace_name || "ProspectAI",
+              from_email: settings?.resend_from_email || undefined,
+            }),
+          });
 
       setSendResults({ sent: data.sent, failed: data.failed });
       setStep("results");
@@ -147,8 +140,9 @@ export default function ComporPage() {
         title: `Abordagem concluída`,
         description: `${data.sent} ${channel === "whatsapp" ? "mensagens" : "emails"} enviados, ${data.failed} falharam`,
       });
-    } catch (err: any) {
-      toast({ title: "Erro no disparo", description: err.message, variant: "destructive" });
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : "Erro no disparo";
+      toast({ title: "Erro no disparo", description: msg, variant: "destructive" });
     } finally {
       setSending(false);
     }
@@ -161,27 +155,27 @@ export default function ComporPage() {
     try {
       if (channel === "whatsapp") {
         if (!contact.phone) return;
-        const { error } = await supabase.functions.invoke("whatsapp-send", {
-          body: { action: "send_single", contacts: [{ contact_id: contact.id, phone: contact.phone, text }] },
+        await apiFetch("/messages/whatsapp", {
+          method: "POST",
+          body: JSON.stringify({ action: "send_single", contacts: [{ contact_id: contact.id, phone: contact.phone, text }] }),
         });
-        if (error) throw error;
       } else {
         const email = contact.custom_fields?.email || contact.email;
         if (!email) return;
-        const { error } = await supabase.functions.invoke("email-send", {
-          body: {
-            action: "send_single",
-            contacts: [{ contact_id: contact.id, email, text }],
+        await apiFetch("/messages/email", {
+          method: "POST",
+          body: JSON.stringify({
+            action: "send_single", contacts: [{ contact_id: contact.id, email, text }],
             subject: emailSubject || "Olá!",
             from_name: settings?.resend_from_name || settings?.workspace_name || "ProspectAI",
             from_email: settings?.resend_from_email || undefined,
-          },
+          }),
         });
-        if (error) throw error;
       }
       toast({ title: `${channel === "whatsapp" ? "Mensagem" : "Email"} enviado para ${contact.name}` });
-    } catch (err: any) {
-      toast({ title: "Erro", description: err.message, variant: "destructive" });
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : "Erro ao enviar";
+      toast({ title: "Erro", description: msg, variant: "destructive" });
     }
   };
 

@@ -1,43 +1,45 @@
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
-import type { OutreachMessage, MessageDirection, MessageChannel, MessageStatus } from "@/lib/types";
+import { apiFetch } from "@/lib/api-client";
+import type { Contact, OutreachMessage, MessageDirection, MessageChannel, MessageStatus } from "@/lib/types";
+
+// O backend novo devolve outreach_messages "cru" (sem join com contacts, sem
+// filtro por direction/channel/status -- so por contact_id, e sem paginacao,
+// so um limit 200 fixo). O join e o filtro que a Supabase fazia no servidor
+// agora sao feitos aqui: o volume e pequeno (nenhum envio real esta ativo
+// ainda, tudo que gera mensagem de verdade e 501 -- ver main.py) e nao
+// compensa portar paginacao/filtro para o backend antes de existir volume.
 
 export interface OutreachFilters {
   direction?: MessageDirection;
   channel?: MessageChannel;
   status?: MessageStatus;
   contactId?: string;
-  search?: string;
-  page?: number;
-  pageSize?: number;
+}
+
+async function contatosPorId(): Promise<Map<string, Contact>> {
+  const r = await apiFetch<{ contacts: Contact[] }>("/contacts?page_size=1000");
+  return new Map(r.contacts.map((c) => [c.id, c]));
+}
+
+function comContato(msg: OutreachMessage, contatos: Map<string, Contact>): OutreachMessage {
+  const c = msg.contact_id ? contatos.get(msg.contact_id) : undefined;
+  return c ? { ...msg, contact: { name: c.name, phone: c.phone, email: c.email, company: c.company } } : msg;
 }
 
 export function useOutreachMessages(filters: OutreachFilters = {}) {
-  const { direction, channel, status, contactId, search, page = 1, pageSize = 25 } = filters;
-
+  const { direction, channel, status, contactId } = filters;
   return useQuery({
     queryKey: ["outreach_messages", filters],
     queryFn: async () => {
-      let query = supabase
-        .from("outreach_messages")
-        .select("*, contacts(name, phone, email, company)", { count: "exact" })
-        .order("created_at", { ascending: false })
-        .range((page - 1) * pageSize, page * pageSize - 1);
-
-      if (direction) query = query.eq("direction", direction);
-      if (channel) query = query.eq("channel", channel);
-      if (status) query = query.eq("status", status);
-      if (contactId) query = query.eq("contact_id", contactId);
-
-      const { data, error, count } = await query;
-      if (error) throw error;
-
-      const messages = (data ?? []).map((row: any) => ({
-        ...row,
-        contact: row.contacts ?? null,
-      })) as OutreachMessage[];
-
-      return { messages, total: count ?? 0, page, pageSize };
+      const path = contactId ? `/outreach-messages?contact_id=${contactId}` : "/outreach-messages";
+      const [msgs, contatos] = await Promise.all([apiFetch<OutreachMessage[]>(path), contatosPorId()]);
+      const filtrados = msgs.filter((m) =>
+        (!direction || m.direction === direction) &&
+        (!channel || m.channel === channel) &&
+        (!status || m.status === status)
+      );
+      const messages = filtrados.map((m) => comContato(m, contatos));
+      return { messages, total: messages.length, page: 1, pageSize: messages.length };
     },
   });
 }
@@ -58,17 +60,14 @@ export function useContactThread(contactId: string) {
   return useQuery({
     queryKey: ["outreach_thread", contactId],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("outreach_messages")
-        .select("*, contacts(name, phone, email, company)")
-        .eq("contact_id", contactId)
-        .eq("channel", "whatsapp")
-        .order("created_at", { ascending: true });
-      if (error) throw error;
-      return (data ?? []).map((row: any) => ({
-        ...row,
-        contact: row.contacts ?? null,
-      })) as OutreachMessage[];
+      const [msgs, contatos] = await Promise.all([
+        apiFetch<OutreachMessage[]>(`/outreach-messages?contact_id=${contactId}`),
+        contatosPorId(),
+      ]);
+      return msgs
+        .filter((m) => m.channel === "whatsapp")
+        .sort((a, b) => a.created_at.localeCompare(b.created_at))
+        .map((m) => comContato(m, contatos));
     },
     enabled: !!contactId,
   });
@@ -78,30 +77,20 @@ export function useInboxConversations() {
   return useQuery({
     queryKey: ["inbox_conversations"],
     queryFn: async () => {
-      // Get all inbound messages grouped by contact
-      const { data, error } = await supabase
-        .from("outreach_messages")
-        .select("*, contacts(name, phone, email, company)")
-        .eq("direction", "inbound")
-        .eq("channel", "whatsapp")
-        .order("created_at", { ascending: false });
+      const [msgs, contatos] = await Promise.all([
+        apiFetch<OutreachMessage[]>("/outreach-messages"),
+        contatosPorId(),
+      ]);
+      const inbound = msgs
+        .filter((m) => m.direction === "inbound" && m.channel === "whatsapp")
+        .sort((a, b) => b.created_at.localeCompare(a.created_at));
 
-      if (error) throw error;
-
-      // Group by contact_id, keep latest message per contact
-      const conversationMap = new Map<string, OutreachMessage>();
-      for (const row of data ?? []) {
-        const meta = row.metadata as Record<string, any> | null;
-        const key = row.contact_id || meta?.phone || row.id;
-        if (!conversationMap.has(key)) {
-          conversationMap.set(key, {
-            ...row,
-            contact: (row as any).contacts ?? null,
-          } as unknown as OutreachMessage);
-        }
+      const porContato = new Map<string, OutreachMessage>();
+      for (const row of inbound) {
+        const chave = row.contact_id || (row.metadata as Record<string, unknown> | null)?.phone as string || row.id;
+        if (!porContato.has(chave)) porContato.set(chave, comContato(row, contatos));
       }
-
-      return Array.from(conversationMap.values());
+      return Array.from(porContato.values());
     },
   });
 }
@@ -110,23 +99,13 @@ export function useOutreachStats() {
   return useQuery({
     queryKey: ["outreach_stats"],
     queryFn: async () => {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const todayIso = today.toISOString();
-
-      const [sentToday, failedToday, inbox] = await Promise.all([
-        supabase.from("outreach_messages").select("id", { count: "exact", head: true })
-          .eq("direction", "outbound").in("status", ["sent", "delivered", "read"]).gte("sent_at", todayIso),
-        supabase.from("outreach_messages").select("id", { count: "exact", head: true })
-          .eq("direction", "outbound").eq("status", "failed").gte("sent_at", todayIso),
-        supabase.from("outreach_messages").select("id", { count: "exact", head: true })
-          .eq("direction", "inbound"),
-      ]);
-
+      const msgs = await apiFetch<OutreachMessage[]>("/outreach-messages");
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      const isToday = (iso: string | null) => !!iso && new Date(iso) >= today;
       return {
-        sent_today: sentToday.count ?? 0,
-        failed_today: failedToday.count ?? 0,
-        inbox_total: inbox.count ?? 0,
+        sent_today: msgs.filter((m) => m.direction === "outbound" && ["sent", "delivered", "read"].includes(m.status) && isToday(m.sent_at)).length,
+        failed_today: msgs.filter((m) => m.direction === "outbound" && m.status === "failed" && isToday(m.sent_at)).length,
+        inbox_total: msgs.filter((m) => m.direction === "inbound").length,
       };
     },
   });

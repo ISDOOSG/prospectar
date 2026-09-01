@@ -1,11 +1,10 @@
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
 import { Outlet, useLocation, useParams, Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
 import { ChevronRight, Bell } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLeadSearches } from "@/hooks/useLeadSearches";
+import { useContactLists } from "@/hooks/useContactLists";
 import { Badge } from "@/components/ui/badge";
 
 const PAGE_TITLES: Record<string, string> = {
@@ -27,14 +26,8 @@ function Breadcrumbs() {
   const params = useParams();
   const path = location.pathname;
 
-  const { data: list } = useQuery({
-    queryKey: ["contact_list", params.listId],
-    queryFn: async () => {
-      const { data } = await supabase.from("contact_lists").select("name").eq("id", params.listId!).single();
-      return data;
-    },
-    enabled: !!params.listId,
-  });
+  const { data: lists } = useContactLists();
+  const list = lists?.find((l) => l.id === params.listId);
 
   if (path === "/") return <span className="text-sm font-semibold text-foreground">Dashboard</span>;
 

@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Inbox, Loader2, Send, MessageSquare, ArrowLeft, User } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
+import { apiFetch, ApiError } from "@/lib/api-client";
 import { useInboxConversations, useContactThread } from "@/hooks/useOutreachMessages";
 import { useSettings, useApiKeys } from "@/hooks/useSettings";
 import { useToast } from "@/hooks/use-toast";
@@ -30,28 +30,16 @@ export default function InboxPage() {
   const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
-  // Realtime subscription for new messages
+  // Sem canal realtime no backend novo -- poll periodico no lugar do
+  // postgres_changes que a Supabase oferecia.
   useEffect(() => {
-    const channel = supabase
-      .channel("inbox-realtime")
-      .on(
-        "postgres_changes" as any,
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "outreach_messages",
-          filter: "direction=eq.inbound",
-        },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ["inbox_conversations"] });
-          if (selectedContactId) {
-            queryClient.invalidateQueries({ queryKey: ["outreach_thread", selectedContactId] });
-          }
-        }
-      )
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
+    const interval = setInterval(() => {
+      queryClient.invalidateQueries({ queryKey: ["inbox_conversations"] });
+      if (selectedContactId) {
+        queryClient.invalidateQueries({ queryKey: ["outreach_thread", selectedContactId] });
+      }
+    }, 8000);
+    return () => clearInterval(interval);
   }, [queryClient, selectedContactId]);
 
   const evoConnected = settings?.evolution_connected;
@@ -186,18 +174,16 @@ function ThreadView({ contactId, onBack }: { contactId: string; onBack: () => vo
     if (!replyText.trim() || !contactPhone) return;
     setSending(true);
     try {
-      const { error } = await supabase.functions.invoke("whatsapp-send", {
-        body: {
-          action: "send_single",
-          contacts: [{ contact_id: contactId, phone: contactPhone, text: replyText.trim() }],
-        },
+      await apiFetch("/messages/whatsapp", {
+        method: "POST",
+        body: JSON.stringify({ action: "send_single", contacts: [{ contact_id: contactId, phone: contactPhone, text: replyText.trim() }] }),
       });
-      if (error) throw error;
       setReplyText("");
       queryClient.invalidateQueries({ queryKey: ["outreach_thread", contactId] });
       toast({ title: "Resposta enviada" });
-    } catch (err: any) {
-      toast({ title: "Erro ao responder", description: err.message, variant: "destructive" });
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : "Erro ao responder";
+      toast({ title: "Erro ao responder", description: msg, variant: "destructive" });
     } finally {
       setSending(false);
     }

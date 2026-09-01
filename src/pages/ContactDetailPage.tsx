@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { apiFetch, ApiError } from "@/lib/api-client";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -20,16 +20,12 @@ export default function ContactDetailPage() {
 
   const { data: contact, isLoading } = useQuery({
     queryKey: ["contact", contactId],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("contacts").select("*").eq("id", contactId!).single();
-      if (error) throw error;
-      return data as Contact;
-    },
+    queryFn: () => apiFetch<Contact>(`/contacts/${contactId}`),
     enabled: !!contactId,
   });
 
   const handleDelete = async () => {
-    await supabase.from("contacts").delete().eq("id", contactId!);
+    await apiFetch(`/contacts/${contactId}`, { method: "DELETE" });
     queryClient.invalidateQueries({ queryKey: ["contacts"] });
     toast({ title: "Contato removido" });
     navigate(`/lists/${listId}`);
@@ -87,10 +83,11 @@ export default function ContactDetailPage() {
           <Button variant="outline" size="sm" disabled={isEnriching} onClick={async () => {
             setIsEnriching(true);
             try {
-              const { data, error } = await supabase.functions.invoke("contact-enrich", { body: { contactId: contact.id } });
+              await apiFetch(`/contacts/${contact.id}/enrich`, { method: "POST" });
               queryClient.invalidateQueries({ queryKey: ["contact", contactId] });
-              if (error) toast({ title: "Erro", description: error.message, variant: "destructive" });
-              else toast({ title: "Enriquecido!", description: `Dados atualizados via ${data?.enriched ? "múltiplas fontes" : "sem novos dados"}.` });
+            } catch (err) {
+              const msg = err instanceof ApiError ? err.message : "Erro ao enriquecer";
+              toast({ title: "Erro", description: msg, variant: "destructive" });
             } finally { setIsEnriching(false); }
           }}>
             {isEnriching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4 text-amber-500" />}

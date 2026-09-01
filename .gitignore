@@ -43,3 +43,8 @@ dist-ssr
 .env.*
 !.env.example
 .pgpass
+
+api/venv/
+api/.env
+__pycache__/
+*.py[cod]

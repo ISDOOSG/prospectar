@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { CheckCircle2, AlertCircle, Loader2, Eye, EyeOff, Smartphone, QrCode, Wifi, WifiOff, RefreshCw } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
+import { apiFetch, ApiError } from "@/lib/api-client";
 import { useToast } from "@/hooks/use-toast";
 import { useSaveSettings, useApiKeys, useSaveApiKey, type AppSettings } from "@/hooks/useSettings";
 
@@ -39,20 +39,17 @@ export default function EvolutionSettings({ settings }: EvolutionSettingsProps) 
     if (!apiUrl.trim()) return;
     setTesting(true);
     try {
-      const { data, error } = await supabase.functions.invoke("evolution-setup", {
-        body: {
-          action: "test",
-          evolution_api_url: apiUrl.trim(),
-          evolution_api_key: apiKey.trim() || undefined,
-        },
+      const data = await apiFetch<{ valid: boolean; message: string }>("/evolution/test", {
+        method: "POST",
+        body: JSON.stringify({ evolution_api_url: apiUrl.trim(), evolution_api_key: apiKey.trim() || undefined }),
       });
-      if (error) throw error;
       toast({
-        title: data.valid ? "✅ Conexão OK" : "❌ Falha na conexão",
+        title: data.valid ? "Conexão OK" : "Falha na conexão",
         description: data.message,
       });
-    } catch (err: any) {
-      toast({ title: "Erro", description: err.message, variant: "destructive" });
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : "Erro ao testar conexão";
+      toast({ title: "Erro", description: msg, variant: "destructive" });
     } finally {
       setTesting(false);
     }
@@ -79,14 +76,10 @@ export default function EvolutionSettings({ settings }: EvolutionSettingsProps) 
       }
 
       // Create instance and get QR
-      const { data, error } = await supabase.functions.invoke("evolution-setup", {
-        body: {
-          action: "setup",
-          evolution_api_url: apiUrl.trim(),
-          evolution_api_key: apiKey.trim() || undefined,
-        },
+      const data = await apiFetch<{ qrcode: string | null; status: string }>("/evolution/setup", {
+        method: "POST",
+        body: JSON.stringify({ evolution_api_url: apiUrl.trim(), evolution_api_key: apiKey.trim() || undefined }),
       });
-      if (error) throw error;
 
       if (data.qrcode) {
         setQrCode(data.qrcode);
@@ -94,14 +87,14 @@ export default function EvolutionSettings({ settings }: EvolutionSettingsProps) 
         setPolling(true);
       } else if (data.status === "open") {
         setConnectionState("open");
-        toast({ title: "✅ WhatsApp já está conectado!" });
+        toast({ title: "WhatsApp já está conectado!" });
       } else {
         toast({ title: "Instância criada", description: "Aguardando QR Code..." });
-        // Try to get QR
         refreshQr();
       }
-    } catch (err: any) {
-      toast({ title: "Erro no setup", description: err.message, variant: "destructive" });
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : "Erro no setup";
+      toast({ title: "Erro no setup", description: msg, variant: "destructive" });
     } finally {
       setSettingUp(false);
     }
@@ -109,10 +102,7 @@ export default function EvolutionSettings({ settings }: EvolutionSettingsProps) 
 
   const refreshQr = async () => {
     try {
-      const { data, error } = await supabase.functions.invoke("evolution-setup", {
-        body: { action: "qrcode" },
-      });
-      if (error) throw error;
+      const data = await apiFetch<{ qrcode: string | null; status: string }>("/evolution/qrcode", { method: "POST" });
       if (data.qrcode) {
         setQrCode(data.qrcode);
         setConnectionState("connecting");
@@ -129,15 +119,12 @@ export default function EvolutionSettings({ settings }: EvolutionSettingsProps) 
 
   const checkStatus = useCallback(async () => {
     try {
-      const { data, error } = await supabase.functions.invoke("evolution-setup", {
-        body: { action: "status" },
-      });
-      if (error) throw error;
+      const data = await apiFetch<{ connected: boolean }>("/evolution/status", { method: "POST" });
       if (data.connected) {
         setConnectionState("open");
         setPolling(false);
         setQrCode(null);
-        toast({ title: "✅ WhatsApp conectado com sucesso!" });
+        toast({ title: "WhatsApp conectado com sucesso!" });
       }
     } catch (err) {
       console.error("Status check error:", err);
@@ -153,14 +140,13 @@ export default function EvolutionSettings({ settings }: EvolutionSettingsProps) 
 
   const handleDisconnect = async () => {
     try {
-      await supabase.functions.invoke("evolution-setup", {
-        body: { action: "disconnect" },
-      });
+      await apiFetch("/evolution/disconnect", { method: "POST" });
       setConnectionState("disconnected");
       setQrCode(null);
       toast({ title: "WhatsApp desconectado" });
-    } catch (err: any) {
-      toast({ title: "Erro", description: err.message, variant: "destructive" });
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : "Erro ao desconectar";
+      toast({ title: "Erro", description: msg, variant: "destructive" });
     }
   };
 

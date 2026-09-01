@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Upload, Loader2, FileSpreadsheet, Check } from "lucide-react";
 import { useContactLists } from "@/hooks/useContactLists";
-import { supabase } from "@/integrations/supabase/client";
+import { apiFetch, ApiError } from "@/lib/api-client";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 
@@ -84,48 +84,51 @@ export default function ImportPage() {
     try {
       let listId = targetListId && targetListId !== "none" ? targetListId : null;
       if (!listId) {
-        const { data: newList, error } = await supabase.from("contact_lists").insert({
-          name: listName || file?.name || "Import", description: "Importado de CSV",
-        }).select().single();
-        if (error) throw error;
+        const newList = await apiFetch<{ id: string }>("/contact-lists", {
+          method: "POST",
+          body: JSON.stringify({ name: listName || file?.name || "Import", description: "Importado de CSV" }),
+        });
         listId = newList.id;
       }
 
-      let count = 0;
+      const contatos = [];
       for (const row of csv.rows) {
-        const contact: Record<string, any> = {};
+        const contact: Record<string, string> = {};
         for (const [csvCol, field] of Object.entries(mapping)) {
           const idx = csv.headers.indexOf(csvCol);
           if (idx >= 0 && row[idx]) contact[field] = row[idx];
         }
         if (!contact.name) continue;
-
-        await supabase.rpc("upsert_lead_contact", {
-          p_name: contact.name || "",
-          p_phone: contact.phone || "",
-          p_company: contact.company || "",
-          p_city: contact.city || "",
-          p_tags: ["imported"],
-          p_list_id: listId,
-          p_custom_fields: {
+        contatos.push({
+          name: contact.name || "",
+          phone: contact.phone || "",
+          company: contact.company || "",
+          city: contact.city || "",
+          tags: ["imported"],
+          custom_fields: {
             email: contact.email || "",
             title: contact.title || "",
             linkedin: contact.linkedin_url || "",
             instagram: contact.instagram || "",
           },
-          p_score: 0,
-          p_source: "apify_contact_scraper",
+          score: 0,
+          source: "apify_contact_scraper",
         });
-        count++;
-        setImported(count);
       }
+
+      const resultado = await apiFetch<{ total: number }>(`/contacts/import?list_id=${listId}`, {
+        method: "POST",
+        body: JSON.stringify(contatos),
+      });
+      setImported(resultado.total);
 
       queryClient.invalidateQueries({ queryKey: ["contacts"] });
       queryClient.invalidateQueries({ queryKey: ["contact_lists"] });
-      toast({ title: "Importado!", description: `${count} contatos importados.` });
+      toast({ title: "Importado!", description: `${resultado.total} contatos importados.` });
       navigate(`/lists/${listId}`);
-    } catch (err: any) {
-      toast({ title: "Erro", description: err.message, variant: "destructive" });
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : "Erro ao importar";
+      toast({ title: "Erro", description: msg, variant: "destructive" });
     } finally {
       setIsImporting(false);
     }

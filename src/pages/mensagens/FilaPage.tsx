@@ -7,7 +7,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { Clock, Loader2, RefreshCw, AlertTriangle, CheckCircle2, XCircle, Mail, MessageSquare } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
+import { apiFetch, ApiError } from "@/lib/api-client";
 import { useQueuedMessages } from "@/hooks/useOutreachMessages";
 import { useSettings } from "@/hooks/useSettings";
 import { useToast } from "@/hooks/use-toast";
@@ -41,43 +41,30 @@ export default function FilaPage() {
       if (msg.channel === "whatsapp") {
         const phone = msg.metadata?.resolved_phone || msg.contact?.phone;
         if (!phone) throw new Error("Sem telefone para reenvio");
-
-        const { error } = await supabase.functions.invoke("whatsapp-send", {
-          body: {
-            action: "send_single",
-            contacts: [{
-              contact_id: msg.contact_id,
-              phone,
-              text: msg.message_text,
-            }],
-          },
+        await apiFetch("/messages/whatsapp", {
+          method: "POST",
+          body: JSON.stringify({ action: "send_single", contacts: [{ contact_id: msg.contact_id, phone, text: msg.message_text }] }),
         });
-        if (error) throw error;
       } else if (msg.channel === "email") {
         const email = msg.metadata?.email_to || msg.contact?.email;
         if (!email) throw new Error("Sem email para reenvio");
-
-        const { error } = await supabase.functions.invoke("email-send", {
-          body: {
-            action: "send_single",
-            contacts: [{
-              contact_id: msg.contact_id,
-              email,
-              text: msg.message_text,
-            }],
+        await apiFetch("/messages/email", {
+          method: "POST",
+          body: JSON.stringify({
+            action: "send_single", contacts: [{ contact_id: msg.contact_id, email, text: msg.message_text }],
             subject: msg.metadata?.subject || "Olá!",
             from_name: settings?.resend_from_name || settings?.workspace_name || "ProspectAI",
             from_email: settings?.resend_from_email || undefined,
-          },
+          }),
         });
-        if (error) throw error;
       }
 
       // Mark original as superseded (optional: just refetch)
       toast({ title: "Mensagem reenviada com sucesso" });
       queryClient.invalidateQueries({ queryKey: ["outreach_messages"] });
-    } catch (err: any) {
-      toast({ title: "Falha no reenvio", description: err.message, variant: "destructive" });
+    } catch (err) {
+      const msg2 = err instanceof ApiError ? err.message : err instanceof Error ? err.message : "Erro ao reenviar";
+      toast({ title: "Falha no reenvio", description: msg2, variant: "destructive" });
     } finally {
       setRetrying(prev => {
         const next = new Set(prev);

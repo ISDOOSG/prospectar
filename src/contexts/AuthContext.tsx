@@ -1,11 +1,9 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
-import { Session, User } from "@supabase/supabase-js";
-import { supabase } from "@/integrations/supabase/client";
-import { useNavigate } from "react-router-dom";
+import { getSession, onAuthChange, signOut as apiSignOut, type ApiSession } from "@/lib/api-client";
 
 interface AuthContextType {
-  session: Session | null;
-  user: User | null;
+  session: ApiSession | null;
+  user: ApiSession["user"] | null;
   loading: boolean;
   signOut: () => Promise<void>;
 }
@@ -13,25 +11,24 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<Session | null>(null);
+  const [session, setSession] = useState<ApiSession | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      setLoading(false);
-    });
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setLoading(false);
-    });
-
-    return () => subscription.unsubscribe();
+    let mounted = true;
+    const load = () => {
+      getSession().then((s) => {
+        if (mounted) { setSession(s); setLoading(false); }
+      });
+    };
+    load();
+    const unsub = onAuthChange(load);
+    return () => { mounted = false; unsub(); };
   }, []);
 
   const signOut = async () => {
-    await supabase.auth.signOut();
+    apiSignOut();
+    setSession(null);
   };
 
   return (
