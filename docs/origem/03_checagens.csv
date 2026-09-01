@@ -1,0 +1,24 @@
+pergunta;resposta
+usuarios cadastrados (auth.users);0
+profiles;0
+  destes, aprovados (is_approved);0
+  destes, ativos (is_active);0
+papeis atribuidos (user_roles);0
+  admins;0
+  supervisors;0
+  agents;0
+chaves de API no registry;0
+  quais servicos (so o nome);(nenhum)
+contatos;0
+  com telefone;0
+  com email;0
+listas de contato;0
+buscas executadas;0
+mensagens de abordagem;0
+jobs de scraping;0
+linhas em settings;0
+linhas em project_config;0
+  chaves de project_config (so os nomes);(nenhuma)
+onboarding concluido;0
+Evolution configurada?;sem linha em settings
+Evolution conectada?;	-
