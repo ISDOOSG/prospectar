@@ -23,7 +23,12 @@ O QUE E 501: tudo que gera resultado de terceiro -- busca de lead
 (Apollo/Apify/Tavily/PDL/CrustData), enriquecimento, geração de abordagem
 por IA, envio de WhatsApp/e-mail. Falham alto dizendo o que falta.
 """
+import datetime
 import json
+import random
+import re
+import secrets as segredos
+import time
 import uuid
 
 import httpx
@@ -50,6 +55,12 @@ app.add_middleware(
 )
 
 CHAVE_CRIPTO = db.CFG.get("LEADKING_CRIPTO_CHAVE")
+WEBHOOK_SEGREDO = db.CFG.get("LEADKING_WEBHOOK_SEGREDO")
+if not WEBHOOK_SEGREDO:
+    raise RuntimeError(
+        "LEADKING_WEBHOOK_SEGREDO ausente em api/.env -- o webhook nao pode "
+        "subir sem segredo: e o unico controle de acesso que ele tem."
+    )
 if not CHAVE_CRIPTO:
     raise RuntimeError(
         "LEADKING_CRIPTO_CHAVE ausente em api/.env -- sem ela as chaves de "
@@ -486,9 +497,288 @@ def listar_mensagens(contact_id: uuid.UUID | None = None, _u=Depends(auth.usuari
     return db.varios("select * from public.outreach_messages order by created_at desc limit 200")
 
 
-@app.post("/messages/whatsapp", status_code=501)
-def enviar_whatsapp(_u=Depends(auth.usuario_atual)):
-    raise HTTPException(501, FALTA_TERCEIRO.format(servico="Evolution API"))
+_RE_NAO_DIGITO = re.compile(r"\D")
+
+
+def normalizar_telefone_br(bruto: str | None) -> str | None:
+    """Porta `normalizeBrazilPhone` da edge function `whatsapp-send`.
+
+    Aceita telefone com ou sem DDI, com ou sem o 9 do celular, com
+    formatacao qualquer, e devolve `55DDDNUMERO` (12 ou 13 digitos) -- o
+    formato que a Evolution espera em `number`. `None` quando nao da para
+    reconhecer.
+    """
+    if not bruto:
+        return None
+    limpo = _RE_NAO_DIGITO.sub("", bruto)
+    if not limpo:
+        return None
+    if limpo.startswith("5555") and len(limpo) >= 14:
+        limpo = limpo[2:]
+    if len(limpo) > 13 and limpo.startswith("55"):
+        limpo = limpo[:13]
+    if len(limpo) in (10, 11):
+        limpo = "55" + limpo
+    if len(limpo) not in (12, 13):
+        return None
+    return limpo
+
+
+def _melhor_telefone(telefone_informado, contato):
+    """Porta `resolveBestPhone`: prioriza celular (55DDD9NNNNNNNN) sobre
+    fixo, e prioriza o telefone dos custom_fields sobre o da tabela e sobre
+    o que veio no corpo da requisicao."""
+    candidatos = []
+    vistos = set()
+    cf = (contato or {}).get("custom_fields") or {}
+
+    def add(valor, origem):
+        n = normalizar_telefone_br(valor) if isinstance(valor, str) else None
+        if n and n not in vistos:
+            vistos.add(n)
+            candidatos.append((n, origem))
+
+    add(cf.get("whatsapp"), "custom_fields.whatsapp")
+    add((contato or {}).get("phone"), "db.phone")
+    add(telefone_informado, "payload.phone")
+    for v in (cf.get("all_phones") or []):
+        add(v, "custom_fields.all_phones")
+
+    celular = next((c for c in candidatos if re.match(r"^55\d{2}9\d{8}$", c[0])), None)
+    escolhido = celular or (candidatos[0] if candidatos else None)
+    return (escolhido[0], escolhido[1]) if escolhido else (None, None)
+
+
+def _config_evolution_para_envio():
+    """URL, chave e nome da instancia, ou HTTPException 400 clara -- a
+    mesma checagem que a edge function fazia contra
+    `settings.evolution_connected` antes de aceitar disparo."""
+    s = db.um(
+        "select evolution_api_url, evolution_instance_name, evolution_connected "
+        "from public.settings limit 1"
+    )
+    if not s or not s["evolution_api_url"]:
+        raise HTTPException(400, "Evolution API nao configurada. Va em Configuracoes -> WhatsApp.")
+    if not s["evolution_connected"]:
+        raise HTTPException(400, "WhatsApp nao esta conectado. Escaneie o QR Code nas Configuracoes.")
+    row = db.um(
+        "select pgp_sym_decrypt(encrypted_secret, %s) as chave "
+        "from public.api_keys_registry where service_name = 'evolution'",
+        (CHAVE_CRIPTO,),
+    )
+    if not row or not row["chave"]:
+        raise HTTPException(400, "Chave da Evolution API nao encontrada.")
+    return s["evolution_api_url"].rstrip("/"), row["chave"], s["evolution_instance_name"] or INSTANCE_NAME
+
+
+def _erro_evolution(corpo, telefone):
+    existe = ((corpo or {}).get("response") or {}).get("message")
+    if isinstance(existe, list) and existe and existe[0].get("exists") is False:
+        return "Numero nao existe no WhatsApp: %s" % telefone
+    if isinstance((corpo or {}).get("error"), str):
+        return corpo["error"]
+    if isinstance((corpo or {}).get("message"), str):
+        return corpo["message"]
+    return "Erro ao enviar para %s" % telefone
+
+
+class ContatoParaEnvio(BaseModel):
+    contact_id: str | None = None
+    phone: str | None = None
+    text: str
+
+
+class EnvioWhatsApp(BaseModel):
+    action: str
+    contacts: list[ContatoParaEnvio]
+
+
+def _contatos_do_banco(ids):
+    if not ids:
+        return {}
+    linhas = db.varios(
+        "select id, phone, custom_fields from public.contacts where id = any(%s)",
+        (ids,),
+    )
+    return {str(l["id"]): l for l in linhas}
+
+
+@app.post("/messages/whatsapp")
+def enviar_whatsapp(e: EnvioWhatsApp, _u=Depends(auth.usuario_atual)):
+    """Porta a edge function `whatsapp-send` (`send_single`/`send_bulk`).
+
+    Nao lida com `resolve_contacts` -- ninguem no front chama essa acao.
+    """
+    if e.action not in ("send_single", "send_bulk"):
+        raise HTTPException(400, "action deve ser 'send_single' ou 'send_bulk'.")
+    if not e.contacts:
+        raise HTTPException(400, "contacts e obrigatorio.")
+
+    base_url, chave, instancia = _config_evolution_para_envio()
+    ids = [c.contact_id for c in e.contacts if c.contact_id]
+    por_id = _contatos_do_banco(ids)
+
+    preparados = []
+    for c in e.contacts:
+        contato = por_id.get(c.contact_id) if c.contact_id else None
+        telefone, origem = _melhor_telefone(c.phone, contato)
+        preparados.append({
+            "contact_id": c.contact_id,
+            "text": (c.text or "").strip(),
+            "telefone": telefone,
+            "origem": origem,
+        })
+
+    if e.action == "send_single":
+        p = preparados[0]
+        if not p["text"]:
+            raise HTTPException(400, "text e obrigatorio.")
+        if not p["telefone"]:
+            raise HTTPException(400, "Nenhum numero valido para envio foi encontrado neste contato.")
+        resp = _evo_fetch(base_url, chave, f"/message/sendText/{instancia}", "POST",
+                          {"number": p["telefone"], "text": p["text"]})
+        status = "sent" if resp["ok"] else "failed"
+        msg_id = ((resp["data"] or {}).get("key") or {}).get("id")
+        db.executar(
+            "insert into public.outreach_messages (contact_id, channel, direction, "
+            "message_text, status, provider, provider_message_id, metadata) "
+            "values (%s, 'whatsapp', 'outbound', %s, %s, 'evolution', %s, %s)",
+            (p["contact_id"], p["text"], status, msg_id,
+             json.dumps({"resolved_phone": p["telefone"], "phone_source": p["origem"],
+                        "instance": instancia,
+                        "error": None if resp["ok"] else _erro_evolution(resp["data"], p["telefone"])})),
+        )
+        if not resp["ok"]:
+            raise HTTPException(500, _erro_evolution(resp["data"], p["telefone"]))
+        if p["contact_id"]:
+            db.executar("update public.contacts set status = 'contatado' where id = %s", (p["contact_id"],))
+        return {"success": True, "message_id": msg_id, "resolved_phone": p["telefone"]}
+
+    # send_bulk
+    resultados = []
+    for i, p in enumerate(preparados):
+        if not p["text"]:
+            resultados.append({"contact_id": p["contact_id"], "success": False, "error": "Missing text"})
+            continue
+        if not p["telefone"]:
+            resultados.append({
+                "contact_id": p["contact_id"], "success": False,
+                "error": "Nenhum numero valido para envio foi encontrado neste contato.",
+            })
+            continue
+        try:
+            resp = _evo_fetch(base_url, chave, f"/message/sendText/{instancia}", "POST",
+                              {"number": p["telefone"], "text": p["text"]})
+            sucesso = resp["ok"]
+            if sucesso and p["contact_id"]:
+                db.executar("update public.contacts set status = 'contatado' where id = %s", (p["contact_id"],))
+            resultados.append({
+                "contact_id": p["contact_id"], "success": sucesso,
+                "message_id": ((resp["data"] or {}).get("key") or {}).get("id"),
+                "error": None if sucesso else _erro_evolution(resp["data"], p["telefone"]),
+            })
+        except Exception as ex:
+            resultados.append({"contact_id": p["contact_id"], "success": False, "error": str(ex)})
+        if i < len(preparados) - 1:
+            time.sleep(3 + random.random() * 5)
+
+    for i, p in enumerate(preparados):
+        db.executar(
+            "insert into public.outreach_messages (contact_id, channel, direction, "
+            "message_text, status, provider, provider_message_id, metadata) "
+            "values (%s, 'whatsapp', 'outbound', %s, %s, 'evolution', %s, %s)",
+            (p["contact_id"], p["text"], "sent" if resultados[i]["success"] else "failed",
+             resultados[i].get("message_id"),
+             json.dumps({"resolved_phone": p["telefone"], "phone_source": p["origem"],
+                        "instance": instancia, "error": resultados[i].get("error")})),
+        )
+
+    enviados = sum(1 for r in resultados if r["success"])
+    falhas = len(resultados) - enviados
+    return {"sent": enviados, "failed": falhas, "total": len(e.contacts), "results": resultados}
+
+
+@app.post("/evolution/webhook/{segredo_recebido}")
+def evolution_webhook(segredo_recebido: str, payload: dict):
+    """Porta a edge function `evolution-webhook`, sem sessao de usuario de
+    proposito: quem chama e a propria Evolution, servidor-a-servidor.
+
+    Fecha a pendencia C.3 (`docs/05_Pendencias.md`): o webhook fica
+    PUBLICO por natureza -- o Evolution roda fora do `127.0.0.1` do host --
+    e o que o protege e o segredo no caminho, no mesmo padrao que o
+    `/api/webhook/evolution/{segredo}` do MoviZap. `compare_digest`, nunca
+    `==`: um endpoint publico aceita quantas tentativas quiserem, e `==`
+    vazaria o tamanho do prefixo certo pelo tempo de resposta.
+
+    `messages.upsert` com `fromMe=false` -> mensagem recebida, tenta achar
+    o contato pelos ultimos 8 digitos do telefone. `messages.update` ->
+    atualiza o status de entrega da mensagem que JA enviamos.
+    """
+    if not segredos.compare_digest(segredo_recebido, WEBHOOK_SEGREDO):
+        raise HTTPException(404)  # 404, nao 401/403 -- nao confirma que a rota existe
+
+    evento = payload.get("event")
+
+    if evento == "messages.upsert":
+        dados = payload.get("data") or {}
+        chave = dados.get("key") or {}
+        if chave.get("fromMe"):
+            return {"received": True, "skipped": "fromMe"}
+
+        remote_jid = chave.get("remoteJid") or ""
+        telefone = re.sub(r"@s\.whatsapp\.net$|@g\.us$", "", remote_jid)
+        msg = dados.get("message") or {}
+        texto = (
+            msg.get("conversation")
+            or (msg.get("extendedTextMessage") or {}).get("text")
+            or (msg.get("imageMessage") or {}).get("caption")
+            or "[midia]"
+        )
+        ts = dados.get("messageTimestamp")
+        quando = (
+            datetime.datetime.fromtimestamp(int(ts), tz=datetime.timezone.utc)
+            if ts else datetime.datetime.now(datetime.timezone.utc)
+        )
+
+        contato_id = None
+        if telefone:
+            cauda = telefone[-8:]
+            achado = db.um(
+                "select id from public.contacts where phone = %s or phone ilike %s limit 1",
+                (telefone, "%" + cauda),
+            )
+            contato_id = achado["id"] if achado else None
+
+        db.executar(
+            "insert into public.outreach_messages (contact_id, channel, direction, "
+            "message_text, status, provider, provider_message_id, sent_at, metadata) "
+            "values (%s, 'whatsapp', 'inbound', %s, 'delivered', 'evolution', %s, %s, %s)",
+            (contato_id, texto, chave.get("id"), quando,
+             json.dumps({"remote_jid": remote_jid, "phone": telefone,
+                        "instance": payload.get("instance"), "push_name": dados.get("pushName")})),
+        )
+        return {"received": True, "direction": "inbound", "contact_id": contato_id}
+
+    if evento == "messages.update":
+        atualizacoes = payload.get("data")
+        atualizacoes = atualizacoes if isinstance(atualizacoes, list) else [atualizacoes]
+        mapa = {3: "delivered", "DELIVERY_ACK": "delivered", 4: "read", "READ": "read",
+                5: "read", "PLAYED": "read"}
+        for u in atualizacoes:
+            if not u:
+                continue
+            msg_id = (u.get("key") or {}).get("id")
+            status_evo = (u.get("update") or {}).get("status")
+            novo_status = mapa.get(status_evo)
+            if msg_id and novo_status:
+                db.executar(
+                    "update public.outreach_messages set status = %s "
+                    "where provider_message_id = %s and direction = 'outbound'",
+                    (novo_status, msg_id),
+                )
+        return {"received": True, "type": "status_update"}
+
+    return {"received": True, "event": evento}
 
 
 @app.post("/messages/email", status_code=501)
@@ -576,14 +866,25 @@ def evolution_setup(a: EvolutionAcao, admin=Depends(auth.exige_role("admin"))):
         })
         if not criar["ok"]:
             raise HTTPException(500, f"Erro ao criar instancia: {criar['data']}")
-        _evo_fetch(url, chave, f"/webhook/set/{INSTANCE_NAME}", "POST", {
-            "webhook": {"enabled": True, "url": f"https://prospectar.imagohub.com.br/api/evolution/webhook",
-                       "webhookByEvents": True, "webhookBase64": False, "events": ["MESSAGES_UPSERT"]},
-        })
         _evo_fetch(url, chave, f"/settings/set/{INSTANCE_NAME}", "POST", {
             "rejectCall": True, "groupsIgnore": True, "alwaysOnline": False,
             "readMessages": False, "readStatus": False,
         })
+
+    # FORA do `if not ja_existe` de proposito: ate 03/09 o webhook so era
+    # registrado na criacao. Rodar o setup de novo (troca de URL, rotacao do
+    # segredo) nunca atualizava o que ja estava configurado na Evolution --
+    # a instancia `prospecta-ai`, criada em 07/08, ficou meses apontando
+    # para um endereco sem o `/evolution/webhook` que so passou a existir
+    # agora, e ninguem tinha como corrigir sem mexer na Evolution na mao.
+    _evo_fetch(url, chave, f"/webhook/set/{INSTANCE_NAME}", "POST", {
+        "webhook": {
+            "enabled": True,
+            "url": f"https://prospectar.imagohub.com.br/api/evolution/webhook/{WEBHOOK_SEGREDO}",
+            "webhookByEvents": True, "webhookBase64": False,
+            "events": ["MESSAGES_UPSERT", "MESSAGES_UPDATE"],
+        },
+    })
 
     existe_settings = db.um("select id from public.settings limit 1")
     if existe_settings:

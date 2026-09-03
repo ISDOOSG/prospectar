@@ -44,8 +44,44 @@ projeto) · se o DDL executa e funciona (executa e funciona).
 |---|---|
 | **C.1** | 🔴 Não recriar RLS `USING(true)` nem GRANT de `anon` para nenhuma tabela — a arquitetura da VPS já evita isso por desenho, mas vale checar no código do serviço que nada abre rota sem autenticação |
 | **C.2** | 🔴 Nenhuma rota devolve segredo em claro — só mascarado, como `list_project_secrets` já fazia certo |
-| **C.3** | Assinar os dois webhooks (`apollo-phone-webhook`, `evolution-webhook`) — copiar o padrão que a VPS já usa no MoviZap |
+| **C.3** | ✅ **Fechado em 03/09** — `evolution-webhook` assinado com segredo no caminho (`/evolution/webhook/{segredo}`, `LEADKING_WEBHOOK_SEGREDO` em `.env`), `compare_digest`, mesmo padrão do MoviZap. `apollo-phone-webhook` continua em aberto — depende da conta Apollo (item B), fora do escopo desta rodada |
 | **C.4** | Preservar a regra do nono dígito em `lead-search-execute` ao portar — é fácil de perder numa reescrita |
+
+## C.5 — Webhook e envio de WhatsApp portados em 03/09/2026
+
+Até esta data `POST /evolution/setup` gravava o endereço do webhook na
+instância da Evolution e `/evolution/webhook` **não existia** — a Evolution
+entregava mensagem num endereço que respondia 404. A prospecção enviava e
+não escutava.
+
+Fechado:
+- `POST /evolution/webhook/{segredo}` — porta a edge function
+  `evolution-webhook`: `messages.upsert` grava em `outreach_messages`,
+  `messages.update` atualiza status de entrega. 11 testes em
+  `api/tests/test_webhook.py`.
+- `POST /messages/whatsapp` saiu do 501 — porta `whatsapp-send`
+  (`send_single`/`send_bulk`), com a mesma resolução de telefone
+  (`normalizeBrazilPhone`/`resolveBestPhone` do original).
+- `/evolution/setup` agora **sempre** re-registra o webhook na Evolution,
+  não só na criação da instância — antes, rodar o setup de novo (troca de
+  URL, rotação de segredo) nunca atualizava o que já estava configurado.
+- Eventos assinados passaram de `["MESSAGES_UPSERT"]` para
+  `["MESSAGES_UPSERT", "MESSAGES_UPDATE"]` — sem o segundo, a Evolution
+  nunca mandaria status de entrega, mesmo com a rota pronta para recebê-lo.
+
+⚠️ **Achado ao mexer:** a instância `prospecta-ai` já existe na Evolution
+desde 07/08, com 46 mensagens e 33 contatos no histórico *dela* — nunca
+sincronizados para cá porque a rota não existia. Está **desconectada desde
+02/09** (conflito de dispositivo). O código está pronto; falta rodar
+`/evolution/setup` de novo (reconectar via QR Code em Configurações) para a
+Evolution passar a chamar o endereço novo, com o segredo.
+
+⚠️ **Achado no banco, não relacionado ao webhook:** a única conta e o único
+contato hoje neste ambiente são resíduo de smoke-test (`smoke.bulkstatus@
+movisat.com.br`, `Contato Smoke`), de 01/09. Não há usuário real cadastrado.
+
+`POST /messages/generate-opener` e `POST /messages/email` continuam em 501
+— dependem de LLM e Resend, fora do escopo desta rodada.
 
 ## D. Onde este documento se encaixa no plano maior
 

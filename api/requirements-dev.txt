@@ -1,0 +1,2 @@
+pytest==9.1.1
+# httpx ja esta em requirements.txt (usado pelo TestClient do FastAPI)
